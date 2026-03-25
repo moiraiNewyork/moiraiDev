@@ -1,0 +1,58 @@
+wallet:
+  name: miner
+  hotkey: default
+
+bittensor:
+  netuid: 361
+  chain_endpoint: wss://test.finney.opentensor.ai:443
+
+task_center:
+  url: http://207.56.24.100/task-center
+
+axon:
+  enabled: true
+  ip: 0.0.0.0
+  port: 8001
+  external_ip: null
+
+miner:
+  min_stake: 0.0
+  gpu_count: 2
+  max_queue_size: 100
+  max_training_jobs: 2
+  max_test_jobs: 4
+
+auto_update:
+  enabled: true
+  github_repo: moiraiNewyork/moirai
+  branch: main
+  check_interval: 1200
+  restart_delay: 30
+
+huggingface:
+  token: <HF_TOKEN>
+  username: <hf_username>
+
+training:
+  text:
+    base_model: HauhauCS/Qwen3.5-9B-Uncensored-HauhauCS-Aggressive
+    default_lora_rank: 16
+    default_lora_alpha: 32
+    default_num_train_epochs: 1
+    default_iteration_count: 1000
+    default_batch_size: 4
+    default_learning_rate: 2e-4
+    default_max_length: 512
+    default_save_steps: 500
+    default_save_total_limit: 2
+
+datasets:
+  text:
+    repository_id: Nitral-AI/Creative_Writing-ShareGPT
+    question_column: question
+    answer_column: answer
+    data_format: jsonl
+
+logging:
+  level: INFO
+  file: logs/miner.log

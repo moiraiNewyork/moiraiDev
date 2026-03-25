@@ -1,0 +1,47 @@
+database:
+  url: postgresql://moirai:moirai@localhost:5432/moirai
+
+redis:
+  url: redis://localhost:6379/0
+
+bittensor:
+  netuid: 361
+  network: test
+  chain_endpoint: wss://test.finney.opentensor.ai:443
+
+wallet:
+  name: task_center
+  hotkey: default
+
+task_center:
+  validators_per_audit_task: 1
+  miner_selection_count: 10
+  min_stake_requirement: 1000.0
+  miner_health_check_interval: 600
+  miner_heartbeat_timeout: 120
+  fallback_validators:
+    - hotkey: 5xxxx...your_validator_hotkey_1
+
+api:
+  key: your_api_key_here
+  allowed_ips:
+    - 127.0.0.1
+    - ::1
+
+auto_update:
+  enabled: true
+  github_repo: moiraiNewyork/moirai
+  branch: main
+  check_interval: 300
+  restart_delay: 10
+
+reward:
+  treasury_ratio: 0.10
+  miner_pool_ratio: 0.90
+  text_task_ratio: 0.30
+  image_task_ratio: 0.70
+
+logging:
+  level: INFO
+  file: logs/task_center.log
+
