@@ -1,13 +1,20 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
+from pydantic import BaseModel
 from moirai.validator.services.score_calculator import ScoreCalculator
 from moirai.validator.schemas.score import ScoreSubmitRequest, ScoreSubmitResponse
 from moirai.common.utils.logging import setup_logger
 import httpx
 from moirai.common.config import settings
+import random
 
 router = APIRouter()
 logger = setup_logger(__name__)
 score_calculator = ScoreCalculator()
+
+class CacheScoresRequest(BaseModel):
+    task_id: str
+    seed: int | None = None
+
 
 @router.post("/submit", response_model=ScoreSubmitResponse)
 async def submit_score(request: ScoreSubmitRequest):

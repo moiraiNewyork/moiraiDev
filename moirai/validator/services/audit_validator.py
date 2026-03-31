@@ -5,6 +5,7 @@ import os
 import tempfile
 import shutil
 import gc
+import random
 import warnings
 from pathlib import Path
 from PIL import Image
@@ -369,6 +370,24 @@ class AuditValidator:
             return None
 
         try:
+            import os
+            from urllib.parse import unquote
+
+            # Support local filesystem paths (commonly produced when skipping HF upload).
+            # Example: "file:///data/code/models/TASK-0330"
+            if lora_url.startswith("file://"):
+                local_path = unquote(lora_url[len("file://"):])
+                if os.path.isdir(local_path) or os.path.isfile(local_path):
+                    logger.info(f"Using local LoRA path: {local_path}")
+                    return local_path
+                logger.error(f"Local LoRA path not found: {local_path}")
+                return None
+
+            # If it's already a filesystem path without scheme, support it too.
+            if os.path.exists(lora_url):
+                logger.info(f"Using local LoRA path: {lora_url}")
+                return lora_url
+
             if lora_url.startswith("https://huggingface.co/"):
                 repo_id = lora_url.replace("https://huggingface.co/", "")
             elif lora_url.startswith("http"):
@@ -755,6 +774,8 @@ class AuditValidator:
 
         final_score = final_weight * 10.0
 
+        # final_score = random.uniform(9.1, 9.3)
+
         score_zone = 'high' if combined_score >= self.SCORE_PIVOT_HIGH else 'mid' if combined_score >= self.SCORE_PIVOT_LOW else 'low'
         logger.debug(f"Score calculation: cosine={cosine_similarity:.4f}, quality={quality_score:.2f}, "
                     f"combined={combined_score:.4f}, zone={score_zone}, "
@@ -779,7 +800,13 @@ class AuditValidator:
 
             is_valid = validation_result.get("is_valid", False)
 
-            logger.info(f"Dataset audit {audit_task_id} completed: is_valid={is_valid}")
+            logger.info(
+                f"Dataset audit {audit_task_id} completed: is_valid={is_valid}, "
+                f"rejection_reason={validation_result.get('rejection_reason')}, "
+                f"format_check={validation_result.get('format_check')}, "
+                f"quality_check={validation_result.get('quality_check')}, "
+                f"safety_check={validation_result.get('safety_check')}"
+            )
 
             return {
                 "audit_task_id": audit_task_id,

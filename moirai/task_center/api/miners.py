@@ -6,6 +6,7 @@ from typing import List
 from moirai.common.database import get_db
 from moirai.common.models.task import Task, TaskStatus
 from moirai.common.models.miner_dataset import MinerDataset
+from moirai.common.models.audit_task import AuditTask
 from moirai.task_center.services.task_dispatcher import TaskDispatcher
 from moirai.task_center.services.audit_task_creator import AuditTaskCreator
 from moirai.task_center.shared import miner_cache
@@ -90,6 +91,30 @@ async def submit_dataset(
         raise HTTPException(status_code=403, detail="Hotkey mismatch")
     
     try:
+        async def ensure_dataset_audit_task(task_id: str, miner_hotkey: str, dataset_url: str, workflow_spec: dict):
+            existing_dataset_audit = db.query(AuditTask).filter(
+                AuditTask.original_task_id == task_id,
+                AuditTask.miner_hotkey == miner_hotkey,
+                AuditTask.audit_type == "dataset",
+                AuditTask.is_completed == False
+            ).first()
+            if existing_dataset_audit:
+                logger.info(
+                    f"Dataset audit task already exists for miner {miner_hotkey[:16]}... "
+                    f"(audit_task_id={existing_dataset_audit.audit_task_id})"
+                )
+                return existing_dataset_audit
+
+            audit_creator = AuditTaskCreator(db)
+            created = await audit_creator.create_dataset_audit_task(
+                task_id=task_id,
+                miner_hotkey=miner_hotkey,
+                dataset_url=dataset_url,
+                task_info=workflow_spec
+            )
+            logger.info(f"Dataset audit task created for miner {miner_hotkey[:16]}... (audit_task_id={created.audit_task_id})")
+            return created
+
         task = db.query(Task).filter(Task.task_id == request.task_id).first()
         if not task:
             raise HTTPException(status_code=404, detail="Task not found")
@@ -110,6 +135,16 @@ async def submit_dataset(
                 existing.dataset_url = request.dataset_url
                 existing.dataset_description = request.dataset_description
                 db.commit()
+                try:
+                    await ensure_dataset_audit_task(
+                        task_id=request.task_id,
+                        miner_hotkey=request.miner_hotkey,
+                        dataset_url=request.dataset_url,
+                        workflow_spec=task.workflow_spec
+                    )
+                except Exception as e:
+                    logger.error(f"Failed to ensure dataset audit task after dataset update: {e}", exc_info=True)
+                    raise HTTPException(status_code=500, detail="Dataset submitted but failed to create audit task")
                 logger.info(f"Updated dataset submission for miner {request.miner_hotkey[:16]}... on task {request.task_id}")
                 return DatasetSubmitResponse(
                     submission_id=existing.id,
@@ -138,16 +173,15 @@ async def submit_dataset(
         logger.info(f"Dataset submitted by miner {request.miner_hotkey[:16]}... for task {request.task_id}")
 
         try:
-            audit_creator = AuditTaskCreator(db)
-            await audit_creator.create_dataset_audit_task(
+            await ensure_dataset_audit_task(
                 task_id=request.task_id,
                 miner_hotkey=request.miner_hotkey,
                 dataset_url=request.dataset_url,
-                task_info=task.workflow_spec
+                workflow_spec=task.workflow_spec
             )
-            logger.info(f"Dataset audit task created for miner {request.miner_hotkey[:16]}...")
         except Exception as e:
-            logger.error(f"Failed to create dataset audit task: {e}", exc_info=True)
+            logger.error(f"Failed to ensure dataset audit task after dataset submit: {e}", exc_info=True)
+            raise HTTPException(status_code=500, detail="Dataset submitted but failed to create audit task")
 
         return DatasetSubmitResponse(
             submission_id=miner_dataset.id,

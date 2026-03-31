@@ -84,7 +84,7 @@ class TextTrainingService:
         return has_adapter and has_config
 
     def _detect_dataset_format(self, dataset) -> str:
-        """Auto-detect dataset format: 'sharegpt', 'prompt_story', or 'qa'."""
+        """Auto-detect dataset format: 'sharegpt', 'prompt_story', 'prompt_response', 'raw_text', or 'qa'."""
         columns = dataset.column_names
         if "conversations" in columns:
             return "sharegpt"
@@ -92,6 +92,9 @@ class TextTrainingService:
             return "prompt_story"
         if "prompt" in columns and "response" in columns:
             return "prompt_response"
+        # Many text datasets expose a single free-form field like `text`/`content`.
+        if any(c in columns for c in ("text", "content", "article", "paragraph", "body", "document")):
+            return "raw_text"
         return "qa"
 
     def _build_sharegpt_texts(self, examples) -> List[str]:
@@ -127,6 +130,25 @@ class TextTrainingService:
         answers = examples.get(a_col, examples.get("answer", []))
         for q, a in zip(questions, answers):
             texts.append(f"### Question:\n{q}\n\n### Answer:\n{a}")
+        return texts
+
+    def _pick_raw_text_column(self, dataset_columns: List[str]) -> str:
+        # Prefer well-known free-form columns first.
+        for c in ("text", "content", "article", "paragraph", "body", "document"):
+            if c in dataset_columns:
+                return c
+        # Fallback: choose the first string-like column name.
+        return dataset_columns[0] if dataset_columns else "text"
+
+    def _build_raw_texts(self, examples, text_col: str) -> List[str]:
+        """Build training texts from a single raw text column."""
+        raw = examples.get(text_col, [])
+        texts: List[str] = []
+        for t in raw:
+            if t is None:
+                continue
+            # Some datasets may return nested types; stringify best-effort.
+            texts.append(str(t))
         return texts
 
     async def train_lora(self, task: Dict[str, Any]) -> Dict[str, Any]:
@@ -257,6 +279,23 @@ class TextTrainingService:
             trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
             total_params = sum(p.numel() for p in model.parameters())
             logger.info(f"Trainable parameters: {trainable_params:,} / {total_params:,} ({100 * trainable_params / total_params:.2f}%)")
+            if trainable_params <= 0:
+                logger.error(
+                    "No trainable parameters after LoRA injection. "
+                    f"base_model={base_model}, target_modules={target_modules}"
+                )
+                raise RuntimeError(
+                    "LoRA initialization produced zero trainable parameters. "
+                    "Please verify target_modules and base model architecture."
+                )
+
+            # Gradient checkpointing + PEFT requires enabling input grads,
+            # otherwise loss can become detached and backward will fail.
+            if hasattr(model, "config"):
+                model.config.use_cache = False
+            if hasattr(model, "enable_input_require_grads"):
+                model.enable_input_require_grads()
+            model.train()
 
             @retry_on_connection_error(max_retries=3, delay=10)
             def load_training_dataset():
@@ -265,18 +304,77 @@ class TextTrainingService:
 
             dataset = load_training_dataset()
 
-            # Auto-detect dataset format
-            dataset_format = text_dataset_config.get("format", self._detect_dataset_format(dataset))
-            logger.info(f"Dataset format detected: {dataset_format}")
+            dataset_columns = list(getattr(dataset, "column_names", []) or [])
+            detected_format = self._detect_dataset_format(dataset)
+
+            # If the miner config forces a format (e.g. sharegpt) but the dataset
+            # doesn't have the required columns, fall back to auto-detection so
+            # training doesn't silently become empty.
+            configured_format = text_dataset_config.get("format")
+            dataset_format = configured_format or detected_format
+
+            if configured_format:
+                if configured_format == "sharegpt" and "conversations" not in dataset_columns:
+                    dataset_format = detected_format
+                elif configured_format in ("prompt_story", "prompt_response"):
+                    if "prompt" not in dataset_columns:
+                        dataset_format = detected_format
+                    else:
+                        if configured_format == "prompt_story" and "story" not in dataset_columns:
+                            dataset_format = detected_format
+                        if configured_format == "prompt_response" and "response" not in dataset_columns:
+                            dataset_format = detected_format
+                elif configured_format == "qa":
+                    q_col = question_column if question_column is not None else "question"
+                    a_col = answer_column if answer_column is not None else "answer"
+                    if q_col not in dataset_columns or a_col not in dataset_columns:
+                        dataset_format = detected_format
+
+            logger.info(f"Dataset format detected: {dataset_format} (configured={configured_format}, auto={detected_format})")
+
+            raw_text_col = self._pick_raw_text_column(dataset_columns)
 
             def preprocess_function(examples):
+                # datasets.map(batched=True) passes column->list batches.
+                # We must always feed tokenizer a non-empty list, otherwise
+                # fast tokenizers can throw IndexError(list index out of range).
+                batch_size = 0
+                if examples:
+                    first_key = next(iter(examples.keys()), None)
+                    if first_key is not None and isinstance(examples.get(first_key), list):
+                        batch_size = len(examples.get(first_key, []))
+
                 if dataset_format == "sharegpt":
                     texts = self._build_sharegpt_texts(examples)
                 elif dataset_format in ("prompt_story", "prompt_response"):
                     story_col = "story" if "story" in dataset.column_names else "response"
                     texts = self._build_prompt_story_texts(examples, "prompt", story_col)
+                elif dataset_format == "raw_text":
+                    texts = self._build_raw_texts(examples, raw_text_col)
                 else:
                     texts = self._build_qa_texts(examples, question_column, answer_column)
+
+                # Fallback: if configured format produced zero samples for this batch,
+                # try raw text extraction from common columns.
+                if not texts:
+                    fallback_col = self._pick_raw_text_column(list(examples.keys()))
+                    texts = self._build_raw_texts(examples, fallback_col)
+                    if texts:
+                        logger.warning(
+                            f"Preprocess fallback triggered: format={dataset_format}, "
+                            f"fallback_col={fallback_col}, batch_size={batch_size}"
+                        )
+
+                # Last resort: keep map pipeline alive and visible in logs.
+                # Use placeholders matching batch size so downstream shapes stay valid.
+                if not texts:
+                    if batch_size <= 0:
+                        batch_size = 1
+                    texts = [" " for _ in range(batch_size)]
+                    logger.warning(
+                        f"Preprocess produced empty texts; using placeholders. "
+                        f"format={dataset_format}, batch_size={batch_size}, example_keys={list(examples.keys())}"
+                    )
 
                 model_inputs = tokenizer(
                     texts,
@@ -336,7 +434,7 @@ class TextTrainingService:
 
             data_collator = DataCollatorForCausalLM(
                 tokenizer=tokenizer,
-                padding=True,
+                padding="max_length",
                 max_length=max_length
             )
 

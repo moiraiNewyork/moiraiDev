@@ -602,7 +602,16 @@ class WeightSyncService:
                 logger.warning("No valid miners found for weight setting")
                 return
 
-            logger.info(f"Setting weights for {len(uids)} miners to chain...")
+            # Log the exact mapping hotkey -> weight that will be sent on-chain.
+            uid_to_hotkey = {miner["uid"]: miner["hotkey"] for miner in miners}
+            hotkey_weight_map = {
+                uid_to_hotkey.get(uid, f"<uid:{uid}>"): w
+                for uid, w in zip(uids, weight_values)
+            }
+            logger.info(
+                f"Setting weights for {len(uids)} miners to chain. "
+                f"hotkeys_and_weights={hotkey_weight_map}"
+            )
 
             self.bittensor_sync.set_weights(uids, weight_values)
 

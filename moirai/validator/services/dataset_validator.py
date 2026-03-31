@@ -139,6 +139,7 @@ class DatasetValidator:
             dataset_id = self._parse_dataset_url(dataset_url)
             if not dataset_id:
                 result["rejection_reason"] = "Invalid HuggingFace dataset URL format"
+                logger.warning(f"Dataset validation failed early: {result['rejection_reason']} (url={dataset_url})")
                 return result
 
             logger.info(f"Starting dataset validation for: {dataset_id}")
@@ -147,6 +148,10 @@ class DatasetValidator:
             result["format_check"] = format_result
             if not format_result["passed"]:
                 result["rejection_reason"] = f"Format check failed: {format_result['details']}"
+                logger.warning(
+                    f"Dataset validation failed at format_check: dataset={dataset_id}, "
+                    f"details={format_result.get('details')}"
+                )
                 return result
 
             min_sample_count = self._get_min_sample_count(task_info)
@@ -155,6 +160,10 @@ class DatasetValidator:
                 result["rejection_reason"] = f"Insufficient dataset samples: {actual_sample_count} < {min_sample_count} (required by dataset_spec.sample_count)"
                 result["format_check"]["details"] = f"Dataset has {actual_sample_count} samples, but minimum {min_sample_count} required"
                 result["format_check"]["passed"] = False
+                logger.warning(
+                    "Dataset validation failed at sample_count check: "
+                    f"dataset={dataset_id}, actual={actual_sample_count}, required={min_sample_count}"
+                )
                 return result
 
             columns_result = self._validate_required_columns(task_info, format_result.get("columns", []))
@@ -162,6 +171,10 @@ class DatasetValidator:
                 result["rejection_reason"] = columns_result["details"]
                 result["format_check"]["details"] = columns_result["details"]
                 result["format_check"]["passed"] = False
+                logger.warning(
+                    f"Dataset validation failed at columns check: dataset={dataset_id}, "
+                    f"details={columns_result.get('details')}"
+                )
                 return result
 
             task_type = self._determine_task_type(task_info)
@@ -170,6 +183,10 @@ class DatasetValidator:
             samples = self._random_sample(dataset, self.SAMPLE_COUNT)
             if len(samples) < self.MIN_SAMPLES_REQUIRED:
                 result["rejection_reason"] = f"Insufficient samples: {len(samples)} < {self.MIN_SAMPLES_REQUIRED}"
+                logger.warning(
+                    "Dataset validation failed at random sampling: "
+                    f"dataset={dataset_id}, sampled={len(samples)}, required={self.MIN_SAMPLES_REQUIRED}"
+                )
                 return result
 
             logger.info(f"Sampled {len(samples)} records for validation")
@@ -183,6 +200,20 @@ class DatasetValidator:
             result["sample_results"] = sample_results
             if not quality_result["passed"]:
                 result["rejection_reason"] = f"Quality check failed: {quality_result['details']}"
+                failed_samples = [s for s in sample_results if not s.get("valid", False)]
+                failed_preview = []
+                for s in failed_samples[:3]:
+                    failed_preview.append({
+                        "index": s.get("index"),
+                        "issues": s.get("issues", []),
+                        "quality_score": s.get("quality_score"),
+                    })
+                logger.warning(
+                    "Dataset validation failed at quality_check: "
+                    f"dataset={dataset_id}, details={quality_result.get('details')}, "
+                    f"pass_rate={quality_result.get('pass_rate')}, avg_score={quality_result.get('average_score')}, "
+                    f"failed_preview={failed_preview}"
+                )
                 return result
 
             if task_type == "text":
@@ -193,6 +224,10 @@ class DatasetValidator:
             result["safety_check"] = safety_result
             if not safety_result["passed"]:
                 result["rejection_reason"] = f"Safety check failed: {safety_result['details']}"
+                logger.warning(
+                    "Dataset validation failed at safety_check: "
+                    f"dataset={dataset_id}, details={safety_result.get('details')}"
+                )
                 return result
 
             result["is_valid"] = True
@@ -202,6 +237,15 @@ class DatasetValidator:
         except Exception as e:
             logger.error(f"Dataset validation error: {e}", exc_info=True)
             result["rejection_reason"] = f"Validation error: {str(e)}"
+
+        if not result.get("is_valid", False):
+            logger.warning(
+                "Dataset validation final result: invalid. "
+                f"rejection_reason={result.get('rejection_reason')}, "
+                f"format_check={result.get('format_check')}, "
+                f"quality_check={result.get('quality_check')}, "
+                f"safety_check={result.get('safety_check')}"
+            )
 
         return result
 

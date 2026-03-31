@@ -282,7 +282,7 @@ class QueueManager:
                             task.submission_error = upload_result.get("error", "HF upload failed")
                         else:
                             result["model_url"] = upload_result.get("model_url")
-                            logger.info(f"Task {task.task_id}: HuggingFace upload completed: {result['model_url']}")
+                            logger.info(f"Task {task.task_id}: HuggingFace upload completed")
 
                             logger.info(f"Task {task.task_id}: Step 3 - Submitting to task center")
                             await self._submit_to_task_center(task, result)
@@ -337,6 +337,25 @@ class QueueManager:
     async def _upload_to_huggingface(self, task: QueuedTask, result: Dict[str, Any], workflow_type: str) -> Dict[str, Any]:
 
         try:
+            # Optional: allow skipping HuggingFace uploads (debug / air-gapped runs).
+            # When enabled, we pretend upload succeeded and keep the rest of the pipeline unchanged.
+            skip_upload = False
+            try:
+                from moirai.miner import shared
+                if shared.yaml_config:
+                    skip_upload = bool(shared.yaml_config.get("huggingface.skip_upload", False))
+            except Exception:
+                pass
+
+            if skip_upload:
+                import os
+                model_path = result.get("model_path", "")
+                model_url = result.get("model_url")
+                if not model_url:
+                    model_url = f"file://{os.path.abspath(model_path)}" if model_path else "file://"
+
+                return {"success": True, "model_url": model_url, "repo_id": None, "skipped": True}
+
             from huggingface_hub import HfApi
             try:
                 from huggingface_hub.errors import HfHubHTTPError

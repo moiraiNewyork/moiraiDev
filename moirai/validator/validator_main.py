@@ -167,6 +167,10 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="MOIRAI Validator", version="1.0.0", lifespan=lifespan)
 app.include_router(router, prefix="/v1")
 
+# Expose runtime singletons to debug endpoints (same process memory).
+app.state.score_cache = score_cache
+app.state.validator_hotkey = wallet.hotkey.ss58_address
+
 @app.get("/health")
 async def health_check():
     try:

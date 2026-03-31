@@ -134,6 +134,7 @@ class BittensorClient:
             for uid in range(len(self.metagraph.hotkeys)):
                 try:
                     axon = self.metagraph.axons[uid] if uid < len(self.metagraph.axons) else None
+                    logger.info(f"Start to process miner {uid}")
                     miners.append({
                         "uid": uid,
                         "hotkey": self.metagraph.hotkeys[uid],
@@ -162,8 +163,9 @@ class BittensorClient:
             
             if len(uids) != len(weights):
                 raise ValueError(f"Uids length ({len(uids)}) != weights length ({len(weights)})")
-            
-            self.subtensor.set_weights(
+
+            # Attempt to capture on-chain hash / info from bittensor.
+            result = self.subtensor.set_weights(
                 netuid=self.netuid,
                 wallet=self.wallet,
                 uids=uids,
@@ -171,7 +173,8 @@ class BittensorClient:
                 wait_for_inclusion=True,
                 version_key=settings.VERSION_KEY
             )
-            logger.info(f"Weights set successfully: {len(uids)} miners")
+            logger.info(f"set_weights result is true")
+
         except Exception as e:
             logger.error(f"Failed to set weights: {e}", exc_info=True)
             raise

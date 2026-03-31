@@ -1,13 +1,13 @@
 # Task Center
 
-Task Center is the core coordination service of the moirai network, responsible for task lifecycle management, miner selection, audit task distribution, and reward calculation.
+Task Center is the core coordination service of the Satori network, responsible for task lifecycle management, miner selection, audit task distribution, and reward calculation.
 
 ## Installation
 
 ### 1. Install Dependencies
 
 ```bash
-cd moirai
+cd satori
 pip install -r requirements.txt
 pip install -e .
 ```
@@ -16,8 +16,8 @@ pip install -e .
 
 ```bash
 # Create PostgreSQL database
-sudo -u postgres psql -c "CREATE USER moirai WITH PASSWORD 'moirai';"
-sudo -u postgres psql -c "CREATE DATABASE moirai OWNER moirai;"
+sudo -u postgres psql -c "CREATE USER satori WITH PASSWORD 'satori';"
+sudo -u postgres psql -c "CREATE DATABASE satori OWNER satori;"
 ```
 
 ### 3. Configuration File
@@ -30,11 +30,11 @@ Edit `config.yml`:
 
 ```yaml
 database:
-  url: postgresql://moirai:moirai@localhost:5432/moirai
+  url: postgresql://satori:satori@localhost:5432/satori
 
 bittensor:
-  netuid: 361
-  chain_endpoint: wss://test.finney.opentensor.ai:443
+  netuid: 119
+  chain_endpoint: wss://entrypoint-finney.opentensor.ai:443
 
 logging:
   level: INFO
@@ -47,36 +47,36 @@ logging:
 
 ```bash
 # Run from project root
-python -m moirai.task_center.task_center_main
+python -m satori.task_center.task_center_main
 ```
 
 ### Option 2: Using PM2
 
 ```bash
 # Start with PM2
-pm2 start "python -m moirai.task_center.task_center_main" \
-  --name task-center \
-  --cwd /opt
+pm2 start "python -m satori.task_center.task_center_main" \
+  --name satori-task-center \
+  --cwd /path/to/satori-sn119
 
 # Save PM2 process list
 pm2 save
 
 # View logs
-pm2 logs moirai-task-center
+pm2 logs satori-task-center
 
 # Monitor
 pm2 monit
 
 # Restart
-pm2 restart moirai-task-center
+pm2 restart satori-task-center
 
 # Stop
-pm2 stop moirai-task-center
+pm2 stop satori-task-center
 ```
 
 ### Option 3: Using uvicorn
 
 ```bash
 # Note: Must use --loop asyncio because bittensor doesn't support uvloop
-uvicorn moirai.task_center.task_center_main:app --host 0.0.0.0 --port 8000 --loop asyncio
+uvicorn satori.task_center.task_center_main:app --host 0.0.0.0 --port 8000 --loop asyncio
 ```

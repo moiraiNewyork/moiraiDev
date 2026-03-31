@@ -140,7 +140,7 @@ class TaskMonitorService:
         miner_hotkey = self.wallet.hotkey.ss58_address
         tasks_url = f"{self.task_center_url}/v1/miners/tasks/available"
         tasks_endpoint = "/v1/miners/tasks/available"
-
+        logger.info(f"tasks_url  {tasks_url}")
         try:
             async with httpx.AsyncClient(timeout=80.0) as client:
                 signature_auth = SignatureAuth(self.wallet)
